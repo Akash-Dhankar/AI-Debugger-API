@@ -2,7 +2,7 @@ import os
 
 os.environ["HF_HOME"] = "A:/hf_cache"
 os.environ["HF_HUB_CACHE"] = "A:/hf_cache/hub"
-os.environ["TRANSFORMERS_CACHE"] = "A:/hf_cache/transformers"  # 👈 ADDED
+os.environ["TRANSFORMERS_CACHE"] = "A:/hf_cache/transformers"
 os.makedirs("A:/hf_cache", exist_ok=True)
 print("✅ Cache set to A:/hf_cache")
 
@@ -21,7 +21,7 @@ if tokenizer.pad_token is None:
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_NAME,
     token=HF_TOKEN,
-    dtype=torch.float32,
+    torch_dtype=torch.float32,
     device_map="cpu",
     low_cpu_mem_usage=True,
     trust_remote_code=True
