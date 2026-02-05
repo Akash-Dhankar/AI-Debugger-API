@@ -71,11 +71,9 @@ CODE:
             "whatNotToDo": "Offline API calls"
         })
 
-
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "healthy", "model": "Gemini-2.5-flash"})
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
