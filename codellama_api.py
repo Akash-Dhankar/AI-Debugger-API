@@ -1,78 +1,81 @@
-import os
-
-os.environ["HF_HOME"] = "A:/hf_cache"
-os.environ["HF_HUB_CACHE"] = "A:/hf_cache/hub"
-os.environ["TRANSFORMERS_CACHE"] = "A:/hf_cache/transformers"
-os.makedirs("A:/hf_cache", exist_ok=True)
-print("✅ Cache set to A:/hf_cache")
-
 from flask import Flask, request, jsonify
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
+import requests
+import json
+import re
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+API_KEY = os.getenv("API_KEY")
 
 app = Flask(__name__)
-HF_TOKEN = os.getenv("HF_TOKEN")
-MODEL_NAME = "bigcode/starcoderbase-1b"
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, token=HF_TOKEN)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    token=HF_TOKEN,
-    torch_dtype=torch.float32,
-    device_map="cpu",
-    low_cpu_mem_usage=True,
-    trust_remote_code=True
-)
 
 @app.route("/generate", methods=["POST"])
 def generate():
+    data = request.json
+    language = data.get("language", "")
+    errorMessage = data.get("errorMessage", "")
+    codeSnippet = data.get("codeSnippet", "")
+
+    prompt = f"""Analyze this exact error and code. Return ONLY valid JSON:
+
+LANGUAGE: {language}
+ERROR: {errorMessage}
+CODE:
+{codeSnippet}
+
+{{"issue": "error type", "rootCause": "why it happens", "fixSteps": "1. step1\n2. step2", "whatNotToDo": "avoid this"}}"""
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 800
+        }
+    }
+
     try:
-        data = request.json
-        prompt = data.get("prompt", "")
-        max_new_tokens = data.get("max_tokens", 128)
-        temperature = data.get("temperature", 0.7)
+        resp = requests.post(url, json=payload)
 
-        if not prompt:
-            return jsonify({"error": "Prompt is required"}), 400
+        if resp.status_code == 200:
+            result = resp.json()
+            ai_text = result['candidates'][0]['content']['parts'][0]['text']
 
-        inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True)
+            # Extract JSON block
+            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', ai_text)
+            if json_match:
+                return jsonify(json.loads(json_match.group()))
 
-        inputs = {k: v.to("cpu") for k, v in inputs.items()}
+            # Fallback parsing
+            return jsonify({
+                "issue": "AI response parsing",
+                "rootCause": ai_text[:300],
+                "fixSteps": "Manual analysis needed",
+                "whatNotToDo": "Trust unparsed AI output"
+            })
+        else:
+            return jsonify({
+                "issue": f"API {resp.status_code}",
+                "rootCause": resp.text[:200],
+                "fixSteps": "New API key needed",
+                "whatNotToDo": "Use expired keys"
+            })
 
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.1
-            )
-
-        generated = tokenizer.decode(
-            outputs[0][inputs["input_ids"].shape[-1]:],
-            skip_special_tokens=True
-        )
-
-        return jsonify({
-            "generated_text": generated.strip(),
-            "model": MODEL_NAME,
-            "success": True
-        })
     except Exception as e:
-        return jsonify({"error": str(e), "success": False}), 500
+        return jsonify({
+            "issue": "Connection error",
+            "rootCause": str(e),
+            "fixSteps": "Check network",
+            "whatNotToDo": "Offline API calls"
+        })
 
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({
-        "status": "healthy",
-        "model": MODEL_NAME,
-        "device": "CPU"
-    })
+    return jsonify({"status": "healthy", "model": "Gemini-2.5-flash"})
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000, debug=True)
